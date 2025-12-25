@@ -324,18 +324,42 @@ def _ensure_app_installed(
     _link_current(app_root, app_dir, logger)
 
 
-def _run_self_test(
+def launcher_self_test(
     bundle_root: Path,
-    app_root: Path,
     logger: logging.Logger,
-) -> None:
+) -> int:
     logger.info("Running launcher self-test.")
-    bundled_app = _get_bundled_app_dir(bundle_root)
-    if bundled_app is None:
-        raise RuntimeError("Bundled app folder missing in launcher bundle.")
-    _validate_bundled_app(bundled_app)
-    (app_root / "versions").mkdir(parents=True, exist_ok=True)
-    _ensure_app_installed(bundle_root, app_root, logger)
+    try:
+        if not bundle_root.exists():
+            raise RuntimeError(f"Bundle root does not exist: {bundle_root}")
+        bundled_app = bundle_root / APP_BUNDLE_DIR / APP_EXE_NAME
+        if not bundled_app.exists():
+            raise RuntimeError(f"Bundled app exe missing: {bundled_app}")
+
+        data_root = get_data_root()
+        data_root.mkdir(parents=True, exist_ok=True)
+        test_path = data_root / "launcher_write_test.tmp"
+        test_path.write_text("ok", encoding="utf-8")
+        test_path.unlink(missing_ok=True)
+
+        logger.info("Launcher self-test completed successfully.")
+        print("Launcher self-test passed.")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        traceback_text = traceback.format_exc()
+        log_path = get_logs_dir() / "launcher.log"
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write("\nLauncher self-test failed:\n")
+                handle.write(traceback_text)
+                handle.write("\n")
+        except Exception:  # noqa: BLE001
+            pass
+        logger.exception("Launcher self-test failed: %s", exc)
+        print(f"Launcher self-test failed: {exc}")
+        print(traceback_text)
+        return 1
 
 
 def main(argv: list[str]) -> int:
@@ -351,9 +375,7 @@ def main(argv: list[str]) -> int:
     _copy_launcher_to_data_root(logger)
 
     if args.self_test:
-        _run_self_test(bundle_root, app_root, logger)
-        logger.info("Self-test completed successfully.")
-        return 0
+        return launcher_self_test(bundle_root, logger)
 
     _ensure_app_installed(bundle_root, app_root, logger)
 

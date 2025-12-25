@@ -1,7 +1,7 @@
 # GrapplingOverlay Install & Update
 
 ## First install
-1. Download `GrapplingOverlayLauncher-windows.zip` from the latest GitHub Release.
+1. Download `GrapplingOverlay-Windows.zip` from the latest GitHub Release.
 2. Unzip it anywhere (e.g., `C:\GrapplingOverlay`).
 3. Double-click `GrapplingOverlayLauncher.exe`.
 
