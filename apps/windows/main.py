@@ -1,7 +1,22 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+
+def _bootstrap_paths() -> None:
+    if getattr(sys, "frozen", False):
+        repo_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        sys.path.insert(0, str(repo_root))
+        os.chdir(Path(sys.executable).parent)
+        return
+
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root))
+
+
+_bootstrap_paths()
 
 from apps.windows import crashguard
 
