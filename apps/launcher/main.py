@@ -13,6 +13,7 @@ import tempfile
 import traceback
 import urllib.request
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from core.paths import ensure_data_dirs, get_app_root, get_data_root, get_logs_dir
@@ -96,16 +97,39 @@ def _validate_bundled_app(bundled_app: Path) -> None:
         raise RuntimeError(f"Bundled app missing {APP_EXE_NAME} at {bundled_app}")
 
 
+def _read_current_path(app_root: Path) -> Path | None:
+    current_file = app_root / "current.txt"
+    if not current_file.exists():
+        return None
+    value = current_file.read_text(encoding="utf-8").strip()
+    if not value:
+        return None
+    return Path(value)
+
+
+def _version_from_path(path: Path) -> str | None:
+    parts = path.resolve().parts
+    if "versions" not in parts:
+        return None
+    index = parts.index("versions")
+    if index + 1 >= len(parts):
+        return None
+    return parts[index + 1]
+
+
 def _read_current_version(app_root: Path) -> str | None:
-    current_file = app_root / "current.txt"
-    if current_file.exists():
-        return current_file.read_text(encoding="utf-8").strip()
-    return None
+    current_path = _read_current_path(app_root)
+    if current_path is None:
+        return None
+    return _version_from_path(current_path)
 
 
-def _write_current_version(app_root: Path, version: str) -> None:
+def _write_current_path(app_root: Path, target_dir: Path, logger: logging.Logger) -> None:
     current_file = app_root / "current.txt"
-    current_file.write_text(version, encoding="utf-8")
+    temp_file = app_root / f"current.txt.{os.getpid()}.tmp"
+    temp_file.write_text(str(target_dir.resolve()), encoding="utf-8")
+    os.replace(temp_file, current_file)
+    logger.info("Updated current pointer to %s", target_dir)
 
 
 def _select_app_dir(version_root: Path) -> Path:
@@ -116,24 +140,29 @@ def _select_app_dir(version_root: Path) -> Path:
     return version_root
 
 
-def _link_current(app_root: Path, target_dir: Path, logger: logging.Logger) -> None:
+def _cleanup_legacy_current(app_root: Path, logger: logging.Logger) -> None:
     current_dir = app_root / "current"
-    if current_dir.exists():
-        shutil.rmtree(current_dir, ignore_errors=True)
+    if not current_dir.exists():
+        return
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = app_root / f"current_old_{timestamp}"
     try:
-        if os.name == "nt":
-            subprocess.run(
-                ["cmd", "/c", "mklink", "/J", "current", str(target_dir)],
-                cwd=app_root,
-                check=True,
-                capture_output=True,
-            )
-            logger.info("Created junction for current -> %s", target_dir)
+        if current_dir.is_dir() and not current_dir.is_symlink():
+            shutil.rmtree(current_dir)
+            logger.info("Removed legacy current folder: %s", current_dir)
             return
+        current_dir.unlink()
+        logger.info("Removed legacy current pointer: %s", current_dir)
+        return
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to create junction: %s", exc)
-    shutil.copytree(target_dir, current_dir)
-    logger.info("Copied current version to %s", current_dir)
+        logger.warning("Failed to remove legacy current; renaming: %s", exc)
+        try:
+            if backup.exists():
+                shutil.rmtree(backup, ignore_errors=True)
+            current_dir.rename(backup)
+            logger.info("Renamed legacy current to %s", backup)
+        except Exception as rename_exc:  # noqa: BLE001
+            logger.warning("Failed to rename legacy current: %s", rename_exc)
 
 
 def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
@@ -201,6 +230,22 @@ def _install_version_from_bundle(
     shutil.copytree(bundled_app, target_dir)
     logger.info("Installed bundled version %s into %s", version, version_root)
     return target_dir
+
+
+def _find_latest_installed(app_root: Path) -> Path | None:
+    versions_dir = app_root / "versions"
+    if not versions_dir.exists():
+        return None
+    candidates: list[tuple[tuple[int, ...], Path]] = []
+    for entry in versions_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        version_key = _parse_version(entry.name)
+        candidates.append((version_key, _select_app_dir(entry)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 def _fetch_json(url: str) -> dict:
@@ -278,21 +323,18 @@ def _update_from_release(repo: str, app_root: Path, logger: logging.Logger) -> b
             raise RuntimeError("Downloaded update failed sha256 verification.")
 
     app_dir = _install_version_from_zip(download_path, version, app_root, logger)
-    _write_current_version(app_root, version)
-    _link_current(app_root, app_dir, logger)
+    _write_current_path(app_root, app_dir, logger)
     logger.info("Update installed to version %s", version)
     _show_message("GrapplingOverlay", f"Updated to v{version}. Launching now.")
     return True
 
 
 def _launch_app(app_root: Path, logger: logging.Logger) -> None:
-    current_dir = app_root / "current"
-    if not current_dir.exists():
-        current_version = _read_current_version(app_root)
-        if current_version:
-            version_root = app_root / "versions" / current_version
-            if version_root.exists():
-                current_dir = _select_app_dir(version_root)
+    current_dir = _read_current_path(app_root)
+    if current_dir is None or not current_dir.exists():
+        current_dir = _find_latest_installed(app_root)
+    if current_dir is None or not current_dir.exists():
+        raise RuntimeError("No installed app version found.")
     exe_path = current_dir / APP_EXE_NAME
     if not exe_path.exists():
         raise RuntimeError(f"Unable to find {APP_EXE_NAME} in {current_dir}")
@@ -310,18 +352,16 @@ def _ensure_app_installed(
         raise RuntimeError("Bundled app folder missing. Reinstall the launcher package.")
     _validate_bundled_app(bundled_app)
 
-    current_version = _read_current_version(app_root)
-    if current_version:
-        version_root = app_root / "versions" / current_version
-        if version_root.exists():
-            exe_path = _select_app_dir(version_root) / APP_EXE_NAME
-            if exe_path.exists():
-                return
-        logger.warning("Current version invalid; reinstalling from bundled app.")
+    _cleanup_legacy_current(app_root, logger)
+    current_path = _read_current_path(app_root)
+    if current_path and current_path.exists():
+        exe_path = current_path / APP_EXE_NAME
+        if exe_path.exists():
+            return
+        logger.warning("Current pointer invalid; reinstalling from bundled app.")
 
     app_dir = _install_version_from_bundle(bundled_app, __version__, app_root, logger)
-    _write_current_version(app_root, __version__)
-    _link_current(app_root, app_dir, logger)
+    _write_current_path(app_root, app_dir, logger)
 
 
 def launcher_self_test(
