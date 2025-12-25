@@ -19,7 +19,8 @@ from core.version import __version__
 
 
 APP_EXE_NAME = "GrapplingOverlay.exe"
-APP_ZIP_NAME = "GrapplingOverlay-windows.zip"
+APP_BUNDLE_DIR = "app"
+APP_ZIP_NAME = "GrapplingOverlay-Windows.zip"
 LAUNCHER_EXE_NAME = "GrapplingOverlayLauncher.exe"
 DEFAULT_REPO = (
     os.environ.get("GRAPPLING_OVERLAY_REPO")
@@ -80,8 +81,8 @@ def _copy_launcher_to_data_root(logger: logging.Logger) -> None:
         logger.warning("Failed to copy launcher to data root: %s", exc)
 
 
-def _get_bundled_zip(launcher_dir: Path) -> Path | None:
-    candidate = launcher_dir / APP_ZIP_NAME
+def _get_bundled_app_dir(launcher_dir: Path) -> Path | None:
+    candidate = launcher_dir / APP_BUNDLE_DIR
     if candidate.exists():
         return candidate
     return None
@@ -100,6 +101,8 @@ def _write_current_version(app_root: Path, version: str) -> None:
 
 
 def _select_app_dir(version_root: Path) -> Path:
+    if (version_root / APP_BUNDLE_DIR).exists():
+        return version_root / APP_BUNDLE_DIR
     if (version_root / "GrapplingOverlay").exists():
         return version_root / "GrapplingOverlay"
     return version_root
@@ -130,6 +133,19 @@ def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
         handle.extractall(dest_dir)
 
 
+def _resolve_packaged_app_root(staging_dir: Path) -> Path:
+    bundled_app = staging_dir / APP_BUNDLE_DIR
+    if bundled_app.exists():
+        return bundled_app
+    legacy_dir = staging_dir / "GrapplingOverlay"
+    if legacy_dir.exists():
+        return legacy_dir
+    legacy_exe = staging_dir / APP_EXE_NAME
+    if legacy_exe.exists():
+        return staging_dir
+    raise RuntimeError("Packaged app payload missing.")
+
+
 def _install_version_from_zip(
     zip_path: Path,
     version: str,
@@ -146,12 +162,37 @@ def _install_version_from_zip(
     staging_dir = Path(tempfile.mkdtemp(prefix="grapplingoverlay_", dir=app_root))
     logger.info("Extracting %s to %s", zip_path, staging_dir)
     _extract_zip(zip_path, staging_dir)
+    app_source = _resolve_packaged_app_root(staging_dir)
     version_root.mkdir(parents=True, exist_ok=True)
-    for item in staging_dir.iterdir():
-        shutil.move(str(item), version_root / item.name)
+    if app_source.name == APP_BUNDLE_DIR:
+        shutil.copytree(app_source, version_root / APP_BUNDLE_DIR)
+    elif app_source.name == "GrapplingOverlay":
+        shutil.copytree(app_source, version_root / "GrapplingOverlay")
+    else:
+        for item in staging_dir.iterdir():
+            shutil.move(str(item), version_root / item.name)
     shutil.rmtree(staging_dir, ignore_errors=True)
     logger.info("Installed version %s into %s", version, version_root)
     return _select_app_dir(version_root)
+
+
+def _install_version_from_bundle(
+    bundled_app: Path,
+    version: str,
+    app_root: Path,
+    logger: logging.Logger,
+) -> Path:
+    versions_dir = app_root / "versions"
+    version_root = versions_dir / version
+    if version_root.exists():
+        logger.info("Version already installed: %s", version)
+        return _select_app_dir(version_root)
+    versions_dir.mkdir(parents=True, exist_ok=True)
+    version_root.mkdir(parents=True, exist_ok=True)
+    target_dir = version_root / APP_BUNDLE_DIR
+    shutil.copytree(bundled_app, target_dir)
+    logger.info("Installed bundled version %s into %s", version, version_root)
+    return target_dir
 
 
 def _fetch_json(url: str) -> dict:
@@ -265,13 +306,14 @@ def main(argv: list[str]) -> int:
     current_version = _read_current_version(app_root)
     if not current_version:
         bundled_zip = _get_bundled_zip(_get_launcher_dir())
-        if bundled_zip is None:
+        bundled_app = _get_bundled_app_dir(_get_launcher_dir())
+        if bundled_app is None:
             _show_error(
                 "GrapplingOverlay",
-                "Bundled app zip missing. Reinstall the launcher package.",
+                "Bundled app folder missing. Reinstall the launcher package.",
             )
             return 1
-        app_dir = _install_version_from_zip(bundled_zip, __version__, app_root, logger)
+        app_dir = _install_version_from_bundle(bundled_app, __version__, app_root, logger)
         _write_current_version(app_root, __version__)
         _link_current(app_root, app_dir, logger)
 
