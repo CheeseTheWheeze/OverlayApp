@@ -2,7 +2,7 @@
 
 ## Quickstart (Windows Release)
 1. Download the latest Release zip.
-2. Unzip `GrapplingOverlayLauncher-windows.zip`.
+2. Unzip `GrapplingOverlay-Windows.zip`.
 3. Double-click `GrapplingOverlayLauncher.exe`.
 
 Logs are written to:

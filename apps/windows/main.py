@@ -175,10 +175,13 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
     from tkinter import filedialog, messagebox
     import importlib.util
     import subprocess
+    import json
 
     root = tk.Tk()
     root.title(f"GrapplingOverlay v{__version__}")
-    root.geometry("420x360")
+    root.geometry("440x440")
+
+    build_info = "Frozen" if getattr(sys, "frozen", False) else "Source"
 
     label = tk.Label(
         root,
@@ -186,6 +189,13 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         font=("Segoe UI", 14, "bold"),
     )
     label.pack(pady=12)
+
+    build_label = tk.Label(
+        root,
+        text=f"Build: {build_info}",
+        font=("Segoe UI", 10),
+    )
+    build_label.pack(pady=4)
 
     def on_check_updates():
         launcher = _find_launcher(crashguard.get_base_dir())
@@ -199,6 +209,9 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         subprocess.Popen([str(launcher), "--update"], close_fds=True)
         root.destroy()
 
+    def on_update_now():
+        on_check_updates()
+
     def on_test_mode():
         try:
             _run_test_mode(60, output_dir, logger, show_dialog=True)
@@ -207,6 +220,36 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
             messagebox.showerror(
                 "Test Mode Error",
                 f"Test mode failed:\n{exc}\n\nSee logs for details.",
+            )
+
+    def on_validate_output():
+        output_file = filedialog.askopenfilename(
+            title="Validate Output JSON",
+            filetypes=[
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*"),
+            ],
+        )
+        if not output_file:
+            return
+        try:
+            payload = json.loads(Path(output_file).read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Output JSON must be an object.")
+            if "frames" not in payload:
+                raise ValueError("Output JSON missing required 'frames' key.")
+            if not isinstance(payload["frames"], list):
+                raise ValueError("Output JSON 'frames' must be a list.")
+            messagebox.showinfo(
+                "Output JSON Valid",
+                f"Output JSON looks valid:\n{output_file}",
+            )
+            logger.info("Validated output JSON: %s", output_file)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Output JSON validation failed: %s", exc)
+            messagebox.showerror(
+                "Output JSON Invalid",
+                f"Output JSON validation failed:\n{exc}",
             )
 
     def on_open_video():
@@ -274,11 +317,11 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
     menu = tk.Menu(root)
     help_menu = tk.Menu(menu, tearoff=0)
     help_menu.add_command(label="Check for Updates", command=on_check_updates)
-    help_menu.add_command(label="Update Now", command=on_check_updates)
+    help_menu.add_command(label="Update Now", command=on_update_now)
     menu.add_cascade(label="Help", menu=help_menu)
     root.config(menu=menu)
 
-    btn_test = tk.Button(root, text="Run Test Mode (synthetic)", width=30, command=on_test_mode)
+    btn_test = tk.Button(root, text="Run Synthetic Test", width=30, command=on_test_mode)
     btn_test.pack(pady=6)
 
     btn_video = tk.Button(
@@ -290,6 +333,14 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         command=on_open_video,
     )
     btn_video.pack(pady=10)
+
+    btn_validate = tk.Button(
+        root,
+        text="Validate Output JSON",
+        width=30,
+        command=on_validate_output,
+    )
+    btn_validate.pack(pady=6)
 
     btn_logs = tk.Button(root, text="Open Logs Folder", width=30, command=on_open_logs)
     btn_logs.pack(pady=6)
