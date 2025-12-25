@@ -33,11 +33,6 @@ jobs:
           if (!(Test-Path "packaging/grapplingoverlay.spec")) { throw "Missing packaging/grapplingoverlay.spec" }
           pyinstaller --noconfirm --clean packaging/grapplingoverlay.spec
 
-      - name: Show spec header
-        shell: pwsh
-        run: |
-          python -c "print(open('packaging/grapplingoverlay.spec','r',encoding='utf-8').read().splitlines()[:40])"
-
       - name: Verify exe output
         shell: pwsh
         run: |
