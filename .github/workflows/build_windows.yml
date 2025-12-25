@@ -44,12 +44,19 @@ jobs:
           }
           Get-ChildItem dist/GrapplingOverlay | Select-Object Name, Length
 
+      - name: Run exe in test mode
+        shell: pwsh
+        run: |
+          $exe = "dist/GrapplingOverlay/GrapplingOverlay.exe"
+          & $exe --test-mode
+          if ($LASTEXITCODE -ne 0) { throw "Test mode failed with exit code $LASTEXITCODE" }
+
       - name: Package zip (exe + deps)
         shell: pwsh
         run: |
           $zip = "GrapplingOverlay-windows.zip"
           if (Test-Path $zip) { Remove-Item $zip }
-          Compress-Archive -Path "dist/GrapplingOverlay/*" -DestinationPath $zip
+          Compress-Archive -Path "dist/GrapplingOverlay" -DestinationPath $zip
           if (!(Test-Path $zip)) { throw "Expected zip missing: $zip" }
           Get-Item $zip | Select-Object Name, Length
 
