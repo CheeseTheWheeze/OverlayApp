@@ -21,33 +21,6 @@ _bootstrap_paths()
 from apps.windows import crashguard
 
 
-def _load_frames_for_preview(video_path: Path):
-    from adapters.video_source import VideoSource
-
-    source = VideoSource(video_path)
-    return list(source.frames())
-
-
-def _draw_overlay(frame, people):
-    import cv2
-
-    for person in people:
-        keypoints = {kp["name"]: kp for kp in person["keypoints"]}
-        for kp in keypoints.values():
-            cv2.circle(frame, (int(kp["x"]), int(kp["y"])), 4, (0, 255, 255), -1)
-        connections = [
-            ("head", "left_hand"),
-            ("head", "right_hand"),
-            ("left_hand", "left_foot"),
-            ("right_hand", "right_foot"),
-        ]
-        for a, b in connections:
-            if a in keypoints and b in keypoints:
-                pt_a = (int(keypoints[a]["x"]), int(keypoints[a]["y"]))
-                pt_b = (int(keypoints[b]["x"]), int(keypoints[b]["y"]))
-                cv2.line(frame, pt_a, pt_b, (255, 0, 0), 2)
-
-
 def _write_pose_tracks(pose_tracks: dict, output_dir: Path) -> Path:
     import json
 
@@ -80,22 +53,88 @@ def _run_test_mode(max_frames: int, output_dir: Path, logger, show_dialog: bool)
     return 0
 
 
-def _run_video_mode(video_path: Path, output_dir: Path, logger) -> None:
+def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int = 300) -> None:
     import cv2
+    from ultralytics import YOLO
 
-    frames = _load_frames_for_preview(video_path)
-    logger.info("Loaded %s frames from %s", len(frames), video_path)
-    pose_tracks, output_path = _run_pipeline(len(frames), frames, str(video_path), output_dir)
+    keypoint_names = [
+        "nose",
+        "left_eye",
+        "right_eye",
+        "left_ear",
+        "right_ear",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+    ]
+
+    logger.info("Loading YOLOv8 pose model on CPU")
+    model = YOLO("yolov8n-pose.pt")
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Unable to open video: {video_path}")
+
+    pose_frames = []
+    frame_index = 0
+    try:
+        while frame_index < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            results = model.predict(frame, device="cpu", verbose=False)
+            result = results[0] if results else None
+            people = []
+            if result is not None and result.keypoints is not None:
+                xy = result.keypoints.xy
+                conf = result.keypoints.conf
+                xy_values = xy.cpu().numpy() if hasattr(xy, "cpu") else xy
+                conf_values = conf.cpu().numpy() if conf is not None and hasattr(conf, "cpu") else conf
+                for person_id, person_xy in enumerate(xy_values):
+                    keypoints = []
+                    for idx, (x, y) in enumerate(person_xy):
+                        name = keypoint_names[idx] if idx < len(keypoint_names) else f"kp_{idx}"
+                        kp_conf = (
+                            float(conf_values[person_id][idx])
+                            if conf_values is not None
+                            else 1.0
+                        )
+                        keypoints.append(
+                            {
+                                "name": name,
+                                "x": float(x),
+                                "y": float(y),
+                                "conf": kp_conf,
+                            }
+                        )
+                    people.append({"person_id": person_id, "keypoints": keypoints})
+
+            pose_frames.append({"frame_index": frame_index, "people": people})
+
+            if result is not None:
+                preview_frame = result.plot()
+            else:
+                preview_frame = frame
+            cv2.imshow("GrapplingOverlay Preview", preview_frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+            frame_index += 1
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+    pose_tracks = {"video": {"path": str(video_path)}, "frames": pose_frames}
+    output_path = _write_pose_tracks(pose_tracks, output_dir)
     logger.info("Wrote pose tracks to %s", output_path)
-
-    for frame_data in pose_tracks["frames"]:
-        if frame_data["frame_index"] >= len(frames):
-            break
-        frame = frames[frame_data["frame_index"]].copy()
-        _draw_overlay(frame, frame_data["people"])
-        cv2.imshow("GrapplingOverlay Preview", frame)
-        if cv2.waitKey(30) & 0xFF == ord("q"):
-            break
     cv2.destroyAllWindows()
 
 
@@ -169,8 +208,15 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
     btn_test = tk.Button(root, text="Run Test Mode (synthetic)", width=30, command=on_test_mode)
     btn_test.pack(pady=6)
 
-    btn_video = tk.Button(root, text="Open Video File...", width=30, command=on_open_video)
-    btn_video.pack(pady=6)
+    btn_video = tk.Button(
+        root,
+        text="Open Video File (Overlay)",
+        width=36,
+        height=2,
+        font=("Segoe UI", 11, "bold"),
+        command=on_open_video,
+    )
+    btn_video.pack(pady=10)
 
     btn_logs = tk.Button(root, text="Open Logs Folder", width=30, command=on_open_logs)
     btn_logs.pack(pady=6)
