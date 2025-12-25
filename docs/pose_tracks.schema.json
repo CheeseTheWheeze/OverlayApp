@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pose Tracks",
+  "type": "object",
+  "required": ["video", "frames"],
+  "properties": {
+    "video": {
+      "type": "object"
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["frame_index", "people"],
+        "properties": {
+          "frame_index": {"type": "integer"},
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["person_id", "keypoints"],
+              "properties": {
+                "person_id": {"type": "integer"},
+                "keypoints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "x", "y", "conf"],
+                    "properties": {
+                      "name": {"type": "string"},
+                      "x": {"type": "number"},
+                      "y": {"type": "number"},
+                      "conf": {"type": "number"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
