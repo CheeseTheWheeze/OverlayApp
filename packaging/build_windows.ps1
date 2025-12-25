@@ -15,6 +15,7 @@ if (Test-Path $distDir) {
 }
 
 pyinstaller apps/windows/main.py `
+  --paths . `
   --name GrapplingOverlay `
   --onedir `
   --noconsole `
