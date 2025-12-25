@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Dict, Any
 
+from core.paths import get_datasets_dir, get_models_dir
 
-REGISTRY_DIR = Path("data_registry")
-DATASETS_FILE = REGISTRY_DIR / "datasets.json"
-MODELS_FILE = REGISTRY_DIR / "model_versions.json"
+DATASETS_FILE = get_datasets_dir() / "datasets.json"
+MODELS_FILE = get_models_dir() / "model_versions.json"
 
 
 def _ensure_registry() -> None:
-    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    DATASETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MODELS_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not DATASETS_FILE.exists():
         DATASETS_FILE.write_text(json.dumps({"datasets": []}, indent=2), encoding="utf-8")
     if not MODELS_FILE.exists():

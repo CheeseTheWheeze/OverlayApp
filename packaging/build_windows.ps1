@@ -22,7 +22,15 @@ pyinstaller apps/windows/main.py `
   --add-data "packaging/resources;resources" `
   --clean
 
+pyinstaller apps/launcher/main.py `
+  --paths . `
+  --name GrapplingOverlayLauncher `
+  --onedir `
+  --noconsole `
+  --clean
+
 $exeDir = Join-Path $distDir "GrapplingOverlay"
+$launcherDir = Join-Path $distDir "GrapplingOverlayLauncher"
 $resourceDllDir = Join-Path $exeDir "resources\dlls"
 New-Item -ItemType Directory -Path $resourceDllDir -Force | Out-Null
 
@@ -36,3 +44,4 @@ foreach ($dll in $dlls) {
 }
 
 Write-Host "Build complete: $exeDir"
+Write-Host "Launcher build complete: $launcherDir"

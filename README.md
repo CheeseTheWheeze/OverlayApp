@@ -2,15 +2,16 @@
 
 ## Quickstart (Windows Release)
 1. Download the latest Release zip.
-2. Unzip the folder anywhere.
-3. Double-click `GrapplingOverlay.exe`.
+2. Unzip `GrapplingOverlayLauncher-windows.zip`.
+3. Double-click `GrapplingOverlayLauncher.exe`.
 
 Logs are written to:
 - `%LOCALAPPDATA%\GrapplingOverlay\logs\app.log`
-- `./logs/app.log` (relative to the executable)
 
 Outputs are written to:
-- `./outputs/pose_tracks.json`
+- `%LOCALAPPDATA%\GrapplingOverlay\outputs\pose_tracks.json`
+
+See `docs/INSTALL_AND_UPDATE.md` for update instructions.
 
 ## Developer (optional)
 > These steps are only required if you want to run from source.

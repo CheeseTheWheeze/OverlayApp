@@ -19,6 +19,13 @@ def _bootstrap_paths() -> None:
 _bootstrap_paths()
 
 from apps.windows import crashguard
+from core.paths import (
+    ensure_data_dirs,
+    get_data_root,
+    get_logs_dir,
+    get_outputs_dir,
+)
+from core.version import __version__
 
 
 def _write_pose_tracks(pose_tracks: dict, output_dir: Path) -> Path:
@@ -53,7 +60,7 @@ def _run_test_mode(max_frames: int, output_dir: Path, logger, show_dialog: bool)
     return 0
 
 
-def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int = 300) -> None:
+def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int = 300) -> Path:
     import cv2
     from ultralytics import YOLO
 
@@ -136,31 +143,61 @@ def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int 
     output_path = _write_pose_tracks(pose_tracks, output_dir)
     logger.info("Wrote pose tracks to %s", output_path)
     cv2.destroyAllWindows()
+    return output_path
 
 
-def _open_logs_folder(log_dir: Path, logger) -> None:
-    import os
+def _open_folder(path: Path, logger, label: str) -> None:
     import subprocess
 
-    logger.info("Opening logs folder: %s", log_dir)
+    logger.info("Opening %s folder: %s", label, path)
     if os.name == "nt":
-        os.startfile(log_dir)  # noqa: S606
+        os.startfile(path)  # noqa: S606
     elif sys.platform == "darwin":
-        subprocess.run(["open", str(log_dir)], check=False)
+        subprocess.run(["open", str(path)], check=False)
     else:
-        subprocess.run(["xdg-open", str(log_dir)], check=False)
+        subprocess.run(["xdg-open", str(path)], check=False)
+
+
+def _find_launcher(base_dir: Path) -> Path | None:
+    data_root = get_data_root()
+    candidates = [
+        data_root / "GrapplingOverlayLauncher.exe",
+        base_dir / "GrapplingOverlayLauncher.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
     import tkinter as tk
     from tkinter import filedialog, messagebox
+    import importlib.util
+    import subprocess
 
     root = tk.Tk()
-    root.title("GrapplingOverlay")
-    root.geometry("420x240")
+    root.title(f"GrapplingOverlay v{__version__}")
+    root.geometry("420x360")
 
-    label = tk.Label(root, text="GrapplingOverlay", font=("Segoe UI", 14, "bold"))
+    label = tk.Label(
+        root,
+        text=f"GrapplingOverlay v{__version__}",
+        font=("Segoe UI", 14, "bold"),
+    )
     label.pack(pady=12)
+
+    def on_check_updates():
+        launcher = _find_launcher(crashguard.get_base_dir())
+        if not launcher:
+            messagebox.showerror(
+                "Update Error",
+                "Launcher not found. Please reinstall GrapplingOverlayLauncher.",
+            )
+            return
+        logger.info("Launching updater: %s", launcher)
+        subprocess.Popen([str(launcher), "--update"], close_fds=True)
+        root.destroy()
 
     def on_test_mode():
         try:
@@ -182,11 +219,19 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         )
         if not video:
             return
+        if importlib.util.find_spec("ultralytics") is None:
+            logger.error("Ultralytics is not installed; cannot run video overlay.")
+            messagebox.showwarning(
+                "Model Not Installed",
+                "Video overlay model not installed in this build yet. "
+                "Update to the latest version or enable the pose model package.",
+            )
+            return
         try:
-            _run_video_mode(Path(video), output_dir, logger)
+            output_path = _run_video_mode(Path(video), output_dir, logger)
             messagebox.showinfo(
                 "Overlay Preview Complete",
-                "Preview finished.\n\nOutputs written to outputs/pose_tracks.json",
+                f"Preview finished.\n\nOutputs written to:\n{output_path}",
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Video processing failed: %s", exc)
@@ -197,13 +242,41 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
 
     def on_open_logs():
         try:
-            _open_logs_folder(log_dir, logger)
+            _open_folder(log_dir, logger, "logs")
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to open logs folder: %s", exc)
             messagebox.showerror(
                 "Open Logs Error",
                 f"Unable to open logs folder:\n{exc}",
             )
+
+    def on_open_outputs():
+        try:
+            _open_folder(output_dir, logger, "outputs")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to open outputs folder: %s", exc)
+            messagebox.showerror(
+                "Open Outputs Error",
+                f"Unable to open outputs folder:\n{exc}",
+            )
+
+    def on_open_data():
+        data_root = get_data_root()
+        try:
+            _open_folder(data_root, logger, "data")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to open data folder: %s", exc)
+            messagebox.showerror(
+                "Open Data Error",
+                f"Unable to open data folder:\n{exc}",
+            )
+
+    menu = tk.Menu(root)
+    help_menu = tk.Menu(menu, tearoff=0)
+    help_menu.add_command(label="Check for Updates", command=on_check_updates)
+    help_menu.add_command(label="Update Now", command=on_check_updates)
+    menu.add_cascade(label="Help", menu=help_menu)
+    root.config(menu=menu)
 
     btn_test = tk.Button(root, text="Run Test Mode (synthetic)", width=30, command=on_test_mode)
     btn_test.pack(pady=6)
@@ -221,6 +294,17 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
     btn_logs = tk.Button(root, text="Open Logs Folder", width=30, command=on_open_logs)
     btn_logs.pack(pady=6)
 
+    btn_outputs = tk.Button(
+        root,
+        text="Open Outputs Folder",
+        width=30,
+        command=on_open_outputs,
+    )
+    btn_outputs.pack(pady=6)
+
+    btn_data = tk.Button(root, text="Open Data Folder", width=30, command=on_open_data)
+    btn_data.pack(pady=6)
+
     root.mainloop()
 
 
@@ -236,12 +320,9 @@ def _parse_args(argv: list[str]):
 def real_main(argv: list[str]) -> int:
     import logging
 
-    base_dir = crashguard.get_base_dir()
-    log_dir, appdata_log_dir = crashguard.get_log_dirs()
-    output_dir = base_dir / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for path in (log_dir, appdata_log_dir):
-        path.mkdir(parents=True, exist_ok=True)
+    ensure_data_dirs()
+    log_dir = get_logs_dir()
+    output_dir = get_outputs_dir()
 
     logger = logging.getLogger("grappling_overlay")
     logger.info("Starting GrapplingOverlay")

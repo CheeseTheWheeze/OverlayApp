@@ -2,13 +2,12 @@
 
 ## Release (copy/paste only)
 1. Download the latest Release zip from GitHub.
-2. Unzip to a folder (e.g., `C:\GrapplingOverlay`).
-3. Double-click `GrapplingOverlay.exe`.
+2. Unzip `GrapplingOverlayLauncher-windows.zip` to a folder (e.g., `C:\GrapplingOverlay`).
+3. Double-click `GrapplingOverlayLauncher.exe`.
 4. Confirm the preview window appears and closes after a short run.
-5. Open `outputs\pose_tracks.json` to confirm output is written.
+5. Open `%LOCALAPPDATA%\GrapplingOverlay\outputs\pose_tracks.json` to confirm output is written.
 6. Check logs:
    - `%LOCALAPPDATA%\GrapplingOverlay\logs\app.log`
-   - `logs\app.log` (relative to the exe)
 
 ## Optional: From source (developers)
 > These steps are optional and only needed for development.
