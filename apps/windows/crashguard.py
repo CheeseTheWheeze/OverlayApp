@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from core.paths import get_logs_dir
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -16,14 +17,8 @@ def get_base_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def get_log_dirs() -> tuple[Path, Path]:
-    base_log = get_base_dir() / "logs"
-    local_base = os.environ.get("LOCALAPPDATA")
-    if local_base:
-        appdata_log = Path(local_base) / "GrapplingOverlay" / "logs"
-    else:
-        appdata_log = Path.home() / ".grappling_overlay" / "logs"
-    return base_log, appdata_log
+def get_log_dirs() -> tuple[Path, ...]:
+    return (get_logs_dir(),)
 
 
 def ensure_dirs() -> None:

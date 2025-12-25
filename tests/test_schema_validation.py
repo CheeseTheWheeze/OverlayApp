@@ -5,10 +5,11 @@ from pathlib import Path
 
 import jsonschema
 
+from core.paths import get_outputs_dir
 
 def test_pose_tracks_schema():
     schema_path = Path("docs/pose_tracks.schema.json")
-    output_path = Path("outputs/pose_tracks.json")
+    output_path = get_outputs_dir() / "pose_tracks.json"
 
     assert schema_path.exists(), "Schema file is missing"
     assert output_path.exists(), "Output JSON is missing; run the app first"
