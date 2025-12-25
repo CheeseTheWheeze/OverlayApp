@@ -23,6 +23,7 @@ from core.paths import (
     ensure_data_dirs,
     get_data_root,
     get_logs_dir,
+    get_models_dir,
     get_outputs_dir,
 )
 from core.version import __version__
@@ -62,6 +63,11 @@ def _run_test_mode(max_frames: int, output_dir: Path, logger, show_dialog: bool)
 
 def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int = 300) -> Path:
     import cv2
+
+    models_dir = get_models_dir()
+    models_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("ULTRALYTICS_CACHE_DIR", str(models_dir))
+
     from ultralytics import YOLO
 
     keypoint_names = [
@@ -84,7 +90,7 @@ def _run_video_mode(video_path: Path, output_dir: Path, logger, max_frames: int 
         "right_ankle",
     ]
 
-    logger.info("Loading YOLOv8 pose model on CPU")
+    logger.info("Loading YOLOv8 pose model on CPU (cache: %s)", models_dir)
     model = YOLO("yolov8n-pose.pt")
 
     cap = cv2.VideoCapture(str(video_path))
@@ -179,7 +185,11 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
 
     root = tk.Tk()
     root.title(f"GrapplingOverlay v{__version__}")
-    root.geometry("440x440")
+    root.geometry("440x470")
+
+    status_var = tk.StringVar(value="Ready")
+    status_label = tk.Label(root, textvariable=status_var, font=("Segoe UI", 10))
+    status_label.pack(pady=4)
 
     build_info = "Frozen" if getattr(sys, "frozen", False) else "Source"
 
@@ -264,13 +274,17 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
             return
         if importlib.util.find_spec("ultralytics") is None:
             logger.error("Ultralytics is not installed; cannot run video overlay.")
+            status_var.set("Model missing")
             messagebox.showwarning(
                 "Model Not Installed",
                 "Video overlay model not installed in this build yet. "
-                "Update to the latest version or enable the pose model package.",
+                "Update to the latest version to install the pose model package.",
             )
             return
         try:
+            status_var.set("Processing...")
+            btn_video.config(state="disabled")
+            root.update_idletasks()
             output_path = _run_video_mode(Path(video), output_dir, logger)
             messagebox.showinfo(
                 "Overlay Preview Complete",
@@ -282,6 +296,9 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
                 "Video Error",
                 f"Unable to process video:\n{exc}\n\nSee logs for details.",
             )
+        finally:
+            status_var.set("Ready")
+            btn_video.config(state="normal")
 
     def on_open_logs():
         try:

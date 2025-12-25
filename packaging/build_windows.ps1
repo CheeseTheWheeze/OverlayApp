@@ -19,6 +19,7 @@ pyinstaller apps/windows/main.py `
   --name GrapplingOverlay `
   --onedir `
   --noconsole `
+  --collect-all ultralytics `
   --add-data "packaging/resources;resources" `
   --clean
 

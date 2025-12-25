@@ -3,3 +3,4 @@ numpy
 jsonschema
 fastapi
 uvicorn
+ultralytics

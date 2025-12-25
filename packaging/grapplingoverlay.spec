@@ -11,6 +11,7 @@ project_root = Path(__file__).resolve().parents[1]
 entrypoint = project_root / "apps" / "windows" / "main.py"
 
 cv2_datas, cv2_binaries, cv2_hidden = collect_all("cv2")
+ultra_datas, ultra_binaries, ultra_hidden = collect_all("ultralytics")
 
 
 def _find_vcruntime() -> list[tuple[str, str]]:
@@ -32,9 +33,9 @@ def _find_vcruntime() -> list[tuple[str, str]]:
 a = Analysis(
     [str(entrypoint)],
     pathex=[str(project_root)],
-    binaries=cv2_binaries + _find_vcruntime(),
-    datas=cv2_datas,
-    hiddenimports=cv2_hidden,
+    binaries=cv2_binaries + ultra_binaries + _find_vcruntime(),
+    datas=cv2_datas + ultra_datas,
+    hiddenimports=cv2_hidden + ultra_hidden,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
