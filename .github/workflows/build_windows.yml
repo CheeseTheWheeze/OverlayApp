@@ -30,19 +30,22 @@ jobs:
       - name: Build with PyInstaller
         shell: pwsh
         run: |
-          if (!(Test-Path "packaging/grapplingoverlay.spec")) { throw "Missing packaging/grapplingoverlay.spec" }
-          pyinstaller --noconfirm --clean packaging/grapplingoverlay.spec
+          pyinstaller --noconfirm --clean --onedir --name GrapplingOverlay apps/windows/main.py
 
       - name: Verify exe output
         shell: pwsh
         run: |
           $exe = "dist/GrapplingOverlay/GrapplingOverlay.exe"
+          if (Test-Path "dist/GrapplingOverlay") {
+            Get-ChildItem dist/GrapplingOverlay | Select-Object Name, Length
+          } else {
+            Write-Host "dist/GrapplingOverlay does not exist"
+          }
           if (!(Test-Path $exe)) {
             Write-Host "PyInstaller output not found. Listing dist:"
             if (Test-Path "dist") { Get-ChildItem -Recurse dist | Select-Object FullName } else { Write-Host "dist/ does not exist" }
             throw "Expected exe missing: $exe"
           }
-          Get-ChildItem dist/GrapplingOverlay | Select-Object Name, Length
 
       - name: Run exe in test mode
         shell: pwsh
