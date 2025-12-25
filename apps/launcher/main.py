@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -58,6 +59,7 @@ def _setup_logger() -> logging.Logger:
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GrapplingOverlay Launcher")
     parser.add_argument("--update", action="store_true", help="Check for and install updates")
+    parser.add_argument("--self-test", action="store_true", help="Run launcher self-test and exit")
     return parser.parse_args(argv[1:])
 
 
@@ -86,6 +88,12 @@ def _get_bundled_app_dir(launcher_dir: Path) -> Path | None:
     if candidate.exists():
         return candidate
     return None
+
+
+def _validate_bundled_app(bundled_app: Path) -> None:
+    exe_path = bundled_app / APP_EXE_NAME
+    if not exe_path.exists():
+        raise RuntimeError(f"Bundled app missing {APP_EXE_NAME} at {bundled_app}")
 
 
 def _read_current_version(app_root: Path) -> str | None:
@@ -292,30 +300,62 @@ def _launch_app(app_root: Path, logger: logging.Logger) -> None:
     subprocess.Popen([str(exe_path)], close_fds=True)
 
 
+def _ensure_app_installed(
+    bundle_root: Path,
+    app_root: Path,
+    logger: logging.Logger,
+) -> None:
+    bundled_app = _get_bundled_app_dir(bundle_root)
+    if bundled_app is None:
+        raise RuntimeError("Bundled app folder missing. Reinstall the launcher package.")
+    _validate_bundled_app(bundled_app)
+
+    current_version = _read_current_version(app_root)
+    if current_version:
+        version_root = app_root / "versions" / current_version
+        if version_root.exists():
+            exe_path = _select_app_dir(version_root) / APP_EXE_NAME
+            if exe_path.exists():
+                return
+        logger.warning("Current version invalid; reinstalling from bundled app.")
+
+    app_dir = _install_version_from_bundle(bundled_app, __version__, app_root, logger)
+    _write_current_version(app_root, __version__)
+    _link_current(app_root, app_dir, logger)
+
+
+def _run_self_test(
+    bundle_root: Path,
+    app_root: Path,
+    logger: logging.Logger,
+) -> None:
+    logger.info("Running launcher self-test.")
+    bundled_app = _get_bundled_app_dir(bundle_root)
+    if bundled_app is None:
+        raise RuntimeError("Bundled app folder missing in launcher bundle.")
+    _validate_bundled_app(bundled_app)
+    (app_root / "versions").mkdir(parents=True, exist_ok=True)
+    _ensure_app_installed(bundle_root, app_root, logger)
+
+
 def main(argv: list[str]) -> int:
     ensure_data_dirs()
     logger = _setup_logger()
     logger.info("Launcher starting (bundle v%s)", __version__)
 
     args = _parse_args(argv)
+    bundle_root = _get_launcher_dir()
     app_root = get_app_root()
     app_root.mkdir(parents=True, exist_ok=True)
 
     _copy_launcher_to_data_root(logger)
 
-    current_version = _read_current_version(app_root)
-    if not current_version:
-        bundled_zip = _get_bundled_zip(_get_launcher_dir())
-        bundled_app = _get_bundled_app_dir(_get_launcher_dir())
-        if bundled_app is None:
-            _show_error(
-                "GrapplingOverlay",
-                "Bundled app folder missing. Reinstall the launcher package.",
-            )
-            return 1
-        app_dir = _install_version_from_bundle(bundled_app, __version__, app_root, logger)
-        _write_current_version(app_root, __version__)
-        _link_current(app_root, app_dir, logger)
+    if args.self_test:
+        _run_self_test(bundle_root, app_root, logger)
+        logger.info("Self-test completed successfully.")
+        return 0
+
+    _ensure_app_installed(bundle_root, app_root, logger)
 
     if args.update:
         repo = DEFAULT_REPO
@@ -344,4 +384,17 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except Exception:  # noqa: BLE001
+        log_path = get_logs_dir() / "launcher.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\nUnhandled exception:\n")
+            handle.write(traceback.format_exc())
+            handle.write("\n")
+        _show_error(
+            "GrapplingOverlay Launcher Error",
+            f"An unexpected error occurred. Details were written to:\n{log_path}",
+        )
+        sys.exit(1)
