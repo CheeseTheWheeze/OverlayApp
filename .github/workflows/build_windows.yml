@@ -35,12 +35,12 @@ jobs:
       - name: Verify exe output
         shell: pwsh
         run: |
-          $exe = "dist/GrapplingOverlay/GrapplingOverlay.exe"
-          if (Test-Path "dist/GrapplingOverlay") {
-            Get-ChildItem dist/GrapplingOverlay | Select-Object Name, Length
-          } else {
-            Write-Host "dist/GrapplingOverlay does not exist"
+          $outputDir = "dist/GrapplingOverlay"
+          $exe = "$outputDir/GrapplingOverlay.exe"
+          if (!(Test-Path $outputDir)) {
+            throw "Expected output directory missing: $outputDir"
           }
+          Get-ChildItem $outputDir | Select-Object Name, Length
           if (!(Test-Path $exe)) {
             Write-Host "PyInstaller output not found. Listing dist:"
             if (Test-Path "dist") { Get-ChildItem -Recurse dist | Select-Object FullName } else { Write-Host "dist/ does not exist" }
