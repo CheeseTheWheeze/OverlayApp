@@ -177,37 +177,54 @@ def _find_launcher(base_dir: Path) -> Path | None:
 
 
 def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
+    import json
+    import subprocess
+    import importlib.util
     import tkinter as tk
     from tkinter import filedialog, messagebox
-    import importlib.util
-    import subprocess
-    import json
+    from tkinter import ttk
 
     root = tk.Tk()
     root.title(f"GrapplingOverlay v{__version__}")
-    root.geometry("440x470")
+    root.geometry("640x640")
+    root.minsize(600, 600)
 
     status_var = tk.StringVar(value="Ready")
-    status_label = tk.Label(root, textvariable=status_var, font=("Segoe UI", 10))
-    status_label.pack(pady=4)
+    progress_var = tk.DoubleVar(value=0.0)
 
-    build_info = "Frozen" if getattr(sys, "frozen", False) else "Source"
+    def append_log(message: str) -> None:
+        log_text.configure(state="normal")
+        log_text.insert("end", message + "\n")
+        log_text.see("end")
+        lines = int(log_text.index("end-1c").split(".")[0])
+        if lines > 200:
+            log_text.delete("1.0", "3.0")
+        log_text.configure(state="disabled")
 
-    label = tk.Label(
-        root,
-        text=f"GrapplingOverlay v{__version__}",
-        font=("Segoe UI", 14, "bold"),
-    )
-    label.pack(pady=12)
+    def set_buttons_state(enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        for button in action_buttons:
+            button.config(state=state)
+        btn_cancel.config(state="normal" if not enabled else "disabled")
 
-    build_label = tk.Label(
-        root,
-        text=f"Build: {build_info}",
-        font=("Segoe UI", 10),
-    )
-    build_label.pack(pady=4)
+    def on_cancel():
+        status_var.set("Cancelled")
+        progress_var.set(0.0)
+        append_log("Cancelled current action.")
 
     def on_check_updates():
+        launcher = _find_launcher(crashguard.get_base_dir())
+        if not launcher:
+            messagebox.showerror(
+                "Update Error",
+                "Launcher not found. Please reinstall GrapplingOverlayLauncher.",
+            )
+            return
+        logger.info("Launching update check: %s", launcher)
+        subprocess.Popen([str(launcher), "--check"], close_fds=True)
+        root.destroy()
+
+    def on_update_now():
         launcher = _find_launcher(crashguard.get_base_dir())
         if not launcher:
             messagebox.showerror(
@@ -219,18 +236,26 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         subprocess.Popen([str(launcher), "--update"], close_fds=True)
         root.destroy()
 
-    def on_update_now():
-        on_check_updates()
-
     def on_test_mode():
         try:
+            set_buttons_state(False)
+            status_var.set("Running synthetic test...")
+            progress_var.set(20.0)
+            root.update_idletasks()
             _run_test_mode(60, output_dir, logger, show_dialog=True)
+            append_log("Synthetic test completed.")
+            progress_var.set(100.0)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Test mode failed: %s", exc)
+            append_log(f"Test mode failed: {exc}")
             messagebox.showerror(
                 "Test Mode Error",
                 f"Test mode failed:\n{exc}\n\nSee logs for details.",
             )
+        finally:
+            status_var.set("Ready")
+            progress_var.set(0.0)
+            set_buttons_state(True)
 
     def on_validate_output():
         output_file = filedialog.askopenfilename(
@@ -254,9 +279,11 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
                 "Output JSON Valid",
                 f"Output JSON looks valid:\n{output_file}",
             )
+            append_log(f"Validated output JSON: {output_file}")
             logger.info("Validated output JSON: %s", output_file)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Output JSON validation failed: %s", exc)
+            append_log(f"Output JSON validation failed: {exc}")
             messagebox.showerror(
                 "Output JSON Invalid",
                 f"Output JSON validation failed:\n{exc}",
@@ -275,6 +302,7 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
         if importlib.util.find_spec("ultralytics") is None:
             logger.error("Ultralytics is not installed; cannot run video overlay.")
             status_var.set("Model missing")
+            append_log("Model missing: ultralytics not installed.")
             messagebox.showwarning(
                 "Model Not Installed",
                 "Video overlay model not installed in this build yet. "
@@ -282,23 +310,28 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
             )
             return
         try:
-            status_var.set("Processing...")
-            btn_video.config(state="disabled")
+            set_buttons_state(False)
+            status_var.set("Processing video...")
+            progress_var.set(15.0)
             root.update_idletasks()
             output_path = _run_video_mode(Path(video), output_dir, logger)
+            append_log(f"Video overlay complete: {output_path}")
             messagebox.showinfo(
                 "Overlay Preview Complete",
                 f"Preview finished.\n\nOutputs written to:\n{output_path}",
             )
+            progress_var.set(100.0)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Video processing failed: %s", exc)
+            append_log(f"Video processing failed: {exc}")
             messagebox.showerror(
                 "Video Error",
                 f"Unable to process video:\n{exc}\n\nSee logs for details.",
             )
         finally:
             status_var.set("Ready")
-            btn_video.config(state="normal")
+            progress_var.set(0.0)
+            set_buttons_state(True)
 
     def on_open_logs():
         try:
@@ -331,47 +364,91 @@ def _build_gui(log_dir: Path, output_dir: Path, logger) -> None:
                 f"Unable to open data folder:\n{exc}",
             )
 
-    menu = tk.Menu(root)
-    help_menu = tk.Menu(menu, tearoff=0)
-    help_menu.add_command(label="Check for Updates", command=on_check_updates)
-    help_menu.add_command(label="Update Now", command=on_update_now)
-    menu.add_cascade(label="Help", menu=help_menu)
-    root.config(menu=menu)
+    top_frame = tk.Frame(root)
+    top_frame.pack(fill="x", padx=12, pady=8)
 
-    btn_test = tk.Button(root, text="Run Synthetic Test", width=30, command=on_test_mode)
-    btn_test.pack(pady=6)
+    buttons_frame = tk.Frame(top_frame)
+    buttons_frame.pack(fill="x")
 
-    btn_video = tk.Button(
-        root,
-        text="Open Video File (Overlay)",
-        width=36,
-        height=2,
-        font=("Segoe UI", 11, "bold"),
-        command=on_open_video,
+    btn_test = tk.Button(buttons_frame, text="Synthetic Test", command=on_test_mode)
+    btn_video = tk.Button(buttons_frame, text="Open Video", command=on_open_video)
+    btn_validate = tk.Button(buttons_frame, text="Validate JSON", command=on_validate_output)
+    btn_check_updates = tk.Button(
+        buttons_frame, text="Check Updates", command=on_check_updates
     )
-    btn_video.pack(pady=10)
+    btn_update_now = tk.Button(buttons_frame, text="Update Now", command=on_update_now)
+    btn_cancel = tk.Button(buttons_frame, text="Cancel", command=on_cancel)
 
-    btn_validate = tk.Button(
-        root,
-        text="Validate Output JSON",
-        width=30,
-        command=on_validate_output,
+    for idx, button in enumerate(
+        (
+            btn_test,
+            btn_video,
+            btn_validate,
+            btn_check_updates,
+            btn_update_now,
+            btn_cancel,
+        )
+    ):
+        button.grid(row=0, column=idx, padx=4, pady=4, sticky="ew")
+        buttons_frame.columnconfigure(idx, weight=1)
+
+    log_frame = tk.Frame(root)
+    log_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+
+    log_text = tk.Text(log_frame, height=14, state="disabled", wrap="word")
+    log_scroll = tk.Scrollbar(log_frame, command=log_text.yview)
+    log_text.configure(yscrollcommand=log_scroll.set)
+    log_text.pack(side="left", fill="both", expand=True)
+    log_scroll.pack(side="right", fill="y")
+
+    for line in (
+        f"GrapplingOverlay v{__version__}",
+        "Ready.",
+    ):
+        append_log(line)
+
+    bottom_frame = tk.Frame(root)
+    bottom_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+    status_label = tk.Label(bottom_frame, textvariable=status_var, font=("Segoe UI", 10))
+    status_label.pack(anchor="w")
+
+    progress = ttk.Progressbar(
+        bottom_frame,
+        orient="horizontal",
+        mode="determinate",
+        maximum=100.0,
+        variable=progress_var,
     )
-    btn_validate.pack(pady=6)
+    progress.pack(fill="x", pady=6)
 
-    btn_logs = tk.Button(root, text="Open Logs Folder", width=30, command=on_open_logs)
-    btn_logs.pack(pady=6)
+    folder_frame = tk.Frame(bottom_frame)
+    folder_frame.pack(fill="x")
 
+    btn_logs = tk.Button(folder_frame, text="Open Logs Folder", command=on_open_logs)
     btn_outputs = tk.Button(
-        root,
-        text="Open Outputs Folder",
-        width=30,
-        command=on_open_outputs,
+        folder_frame, text="Open Outputs Folder", command=on_open_outputs
     )
-    btn_outputs.pack(pady=6)
+    btn_data = tk.Button(folder_frame, text="Open Data Folder", command=on_open_data)
 
-    btn_data = tk.Button(root, text="Open Data Folder", width=30, command=on_open_data)
-    btn_data.pack(pady=6)
+    btn_logs.grid(row=0, column=0, padx=4, pady=4, sticky="ew")
+    btn_outputs.grid(row=0, column=1, padx=4, pady=4, sticky="ew")
+    btn_data.grid(row=0, column=2, padx=4, pady=4, sticky="ew")
+    for idx in range(3):
+        folder_frame.columnconfigure(idx, weight=1)
+
+    action_buttons = [
+        btn_test,
+        btn_video,
+        btn_validate,
+        btn_check_updates,
+        btn_update_now,
+        btn_logs,
+        btn_outputs,
+        btn_data,
+    ]
+
+    set_buttons_state(True)
 
     root.mainloop()
 
