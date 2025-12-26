@@ -83,9 +83,12 @@ jobs:
       - name: Package GrapplingOverlay-Windows.zip
         shell: pwsh
         run: |
-          $zip = "GrapplingOverlay-Windows.zip"
+          $packageRoot = "package_root"
+          $zip = Join-Path (Resolve-Path .) "GrapplingOverlay-Windows.zip"
           if (Test-Path $zip) { Remove-Item $zip }
-          Compress-Archive -Path "package_root/*" -DestinationPath $zip
+          Push-Location (Resolve-Path .)
+          Compress-Archive -Path "$packageRoot/*" -DestinationPath $zip -Exclude "*.zip"
+          Pop-Location
           if (!(Test-Path $zip)) { throw "Expected zip missing: $zip" }
           Get-Item $zip | Select-Object Name, Length
 
@@ -93,18 +96,9 @@ jobs:
         shell: pwsh
         run: |
           $zip = "GrapplingOverlay-Windows.zip"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
-          try {
-            $entries = $archive.Entries
-            $entries | Select-Object FullName, Length
-            $nested = $entries | Where-Object { $_.FullName -match '\\.zip$' }
-            if ($nested) {
-              $names = $nested.FullName -join ", "
-              throw "Nested zip(s) found: $names"
-            }
-          } finally {
-            $archive.Dispose()
+          $nested = cmd /c "tar -tf $zip | findstr /i \".zip\""
+          if ($LASTEXITCODE -eq 0) {
+            throw "Nested zip(s) found: $nested"
           }
 
       - name: Generate latest.json with sha256
