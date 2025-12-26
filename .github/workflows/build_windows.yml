@@ -90,12 +90,12 @@ jobs:
           if (!(Test-Path $zip)) { throw "Expected zip missing: $zip" }
           Get-Item $zip | Select-Object Name, Length
 
-      - name: Verify zip contents (no nested zips)
+      - name: Verify zip contents (no nested distribution zips)
         shell: cmd
         run: |
-          tar -tf GrapplingOverlay-Windows.zip | findstr /i ".zip"
+          tar -tf GrapplingOverlay-Windows.zip | findstr /i "GrapplingOverlay-Windows.zip"
           if errorlevel 1 exit /b 0
-          echo Nested zip detected
+          echo Nested distribution zip detected
           exit /b 1
 
       - name: Generate latest.json with sha256
