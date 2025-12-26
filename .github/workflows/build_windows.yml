@@ -86,9 +86,7 @@ jobs:
           $packageRoot = "package_root"
           $zip = Join-Path (Resolve-Path .) "GrapplingOverlay-Windows.zip"
           if (Test-Path $zip) { Remove-Item $zip }
-          Push-Location (Resolve-Path .)
-          Compress-Archive -Path "$packageRoot/*" -DestinationPath $zip -Exclude "*.zip"
-          Pop-Location
+          Compress-Archive -Path "$packageRoot\*" -DestinationPath $zip
           if (!(Test-Path $zip)) { throw "Expected zip missing: $zip" }
           Get-Item $zip | Select-Object Name, Length
 
