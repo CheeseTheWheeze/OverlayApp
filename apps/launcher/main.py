@@ -59,7 +59,9 @@ def _setup_logger() -> logging.Logger:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GrapplingOverlay Launcher")
+    parser.add_argument("--check", action="store_true", help="Check for updates and exit")
     parser.add_argument("--update", action="store_true", help="Check for and install updates")
+    parser.add_argument("--launch", action="store_true", help="Launch the app and exit")
     parser.add_argument("--self-test", action="store_true", help="Run launcher self-test and exit")
     return parser.parse_args(argv[1:])
 
@@ -286,7 +288,12 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts or [0])
 
 
-def _update_from_release(repo: str, app_root: Path, logger: logging.Logger) -> bool:
+def _update_from_release(
+    repo: str,
+    app_root: Path,
+    logger: logging.Logger,
+    show_ui: bool = True,
+) -> bool:
     release = _fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
     version_tag = release.get("tag_name", "")
     version = version_tag.lstrip("v") or version_tag
@@ -294,7 +301,12 @@ def _update_from_release(repo: str, app_root: Path, logger: logging.Logger) -> b
         raise RuntimeError("Latest release does not contain a tag name.")
     current_version = _read_current_version(app_root)
     if current_version and _parse_version(version) <= _parse_version(current_version):
-        _show_message("GrapplingOverlay", f"Already up to date (v{current_version}).")
+        message = f"Up to date: v{current_version}"
+        logger.info(message)
+        if show_ui:
+            _show_message("GrapplingOverlay", message)
+        else:
+            print(message)
         return False
 
     assets = release.get("assets", [])
@@ -325,7 +337,42 @@ def _update_from_release(repo: str, app_root: Path, logger: logging.Logger) -> b
     app_dir = _install_version_from_zip(download_path, version, app_root, logger)
     _write_current_path(app_root, app_dir, logger)
     logger.info("Update installed to version %s", version)
-    _show_message("GrapplingOverlay", f"Updated to v{version}. Launching now.")
+    message = f"Updated to v{version}. Launching now."
+    if show_ui:
+        _show_message("GrapplingOverlay", message)
+    else:
+        print(message)
+    return True
+
+
+def _check_for_updates(
+    repo: str,
+    app_root: Path,
+    logger: logging.Logger,
+    show_ui: bool = True,
+) -> bool:
+    release = _fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
+    version_tag = release.get("tag_name", "")
+    version = version_tag.lstrip("v") or version_tag
+    if not version:
+        raise RuntimeError("Latest release does not contain a tag name.")
+
+    current_version = _read_current_version(app_root)
+    if current_version and _parse_version(version) <= _parse_version(current_version):
+        message = f"Up to date: v{current_version}"
+        logger.info(message)
+        if show_ui:
+            _show_message("GrapplingOverlay", message)
+        else:
+            print(message)
+        return False
+
+    message = f"Update available: v{version}"
+    logger.info(message)
+    if show_ui:
+        _show_message("GrapplingOverlay", message)
+    else:
+        print(message)
     return True
 
 
@@ -419,29 +466,139 @@ def main(argv: list[str]) -> int:
 
     _ensure_app_installed(bundle_root, app_root, logger)
 
-    if args.update:
+    if args.check or args.update or args.launch:
         repo = DEFAULT_REPO
-        if not repo:
+        if (args.check or args.update) and not repo:
             _show_error(
                 "GrapplingOverlay",
                 "Update repo not configured. Set GRAPPLING_OVERLAY_REPO=owner/repo.",
             )
-        else:
+            return 1
+        if args.check:
             try:
-                _update_from_release(repo, app_root, logger)
+                _check_for_updates(repo, app_root, logger, show_ui=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Update check failed: %s", exc)
+                _show_error(
+                    "GrapplingOverlay Update Failed",
+                    f"{exc}\n\nSee launcher.log for details.",
+                )
+                return 1
+        if args.update:
+            try:
+                _update_from_release(repo, app_root, logger, show_ui=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Update failed: %s", exc)
+                print(f"Update failed: {exc}")
+                return 1
+        if args.launch:
+            try:
+                _launch_app(app_root, logger)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to launch app: %s", exc)
+                print(f"Failed to launch app: {exc}")
+                return 1
+        return 0
+
+    def open_folder(path: Path, label: str) -> None:
+        logger.info("Opening %s folder: %s", label, path)
+        if os.name == "nt":
+            os.startfile(path)  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(path)], check=False)
+
+    def launch_gui() -> None:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.title("GrapplingOverlay Launcher")
+        root.geometry("360x280")
+        root.resizable(False, False)
+
+        status_var = tk.StringVar(value=f"Bundle v{__version__}")
+        status_label = tk.Label(root, textvariable=status_var, font=("Segoe UI", 10))
+        status_label.pack(pady=8)
+
+        def on_launch():
+            try:
+                _launch_app(app_root, logger)
+                root.destroy()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to launch app: %s", exc)
+                _show_error("GrapplingOverlay", f"Failed to launch app:\n{exc}")
+
+        def on_check_updates():
+            repo = DEFAULT_REPO
+            if not repo:
+                _show_error(
+                    "GrapplingOverlay",
+                    "Update repo not configured. Set GRAPPLING_OVERLAY_REPO=owner/repo.",
+                )
+                return
+            try:
+                _check_for_updates(repo, app_root, logger, show_ui=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Update check failed: %s", exc)
+                _show_error(
+                    "GrapplingOverlay Update Failed",
+                    f"{exc}\n\nSee launcher.log for details.",
+                )
+
+        def on_update_now():
+            repo = DEFAULT_REPO
+            if not repo:
+                _show_error(
+                    "GrapplingOverlay",
+                    "Update repo not configured. Set GRAPPLING_OVERLAY_REPO=owner/repo.",
+                )
+                return
+            try:
+                updated = _update_from_release(repo, app_root, logger, show_ui=True)
+                if updated:
+                    _launch_app(app_root, logger)
+                    root.destroy()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Update failed: %s", exc)
                 _show_error(
                     "GrapplingOverlay Update Failed",
-                    f"{exc}\n\nThe existing version will continue to be used.",
+                    f"{exc}\n\nSee launcher.log for details.",
                 )
 
-    try:
-        _launch_app(app_root, logger)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to launch app: %s", exc)
-        _show_error("GrapplingOverlay", f"Failed to launch app:\n{exc}")
-        return 1
+        def on_open_data():
+            try:
+                open_folder(get_data_root(), "data")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to open data folder: %s", exc)
+                messagebox.showerror("Open Data Error", f"Unable to open data folder:\n{exc}")
+
+        def on_open_logs():
+            try:
+                open_folder(get_logs_dir(), "logs")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to open logs folder: %s", exc)
+                messagebox.showerror("Open Logs Error", f"Unable to open logs folder:\n{exc}")
+
+        button_frame = tk.Frame(root)
+        button_frame.pack(padx=16, pady=6, fill="x")
+
+        tk.Button(button_frame, text="Launch App", command=on_launch).pack(fill="x", pady=4)
+        tk.Button(button_frame, text="Check for Updates", command=on_check_updates).pack(
+            fill="x", pady=4
+        )
+        tk.Button(button_frame, text="Update Now", command=on_update_now).pack(
+            fill="x", pady=4
+        )
+        tk.Button(button_frame, text="Open Data Folder", command=on_open_data).pack(
+            fill="x", pady=4
+        )
+        tk.Button(button_frame, text="Open Logs", command=on_open_logs).pack(fill="x", pady=4)
+
+        root.mainloop()
+
+    launch_gui()
     return 0
 
 
